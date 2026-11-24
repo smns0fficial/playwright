@@ -123,6 +123,8 @@ Die globale CLI ist optional und ersetzt nicht die lokale Projektabhängigkeit. 
 
 ```dotenv
 BASE_URL=http://localhost:8080
+# Optionaler Application Context Path; leer für Root-Anwendungen
+APP_PATH=/meine-anwendung
 E2E_ALLOWED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080
 E2E_USERNAME=
 E2E_PASSWORD=
@@ -140,6 +142,8 @@ cp -n frontend/.env.test.example frontend/.env.test
 ```
 
 Das Setup legt `.env.test` nur an, wenn sie noch nicht existiert. npm-Skripte laufen im Verzeichnis der package.json, daher ohne `frontend/` im Kopierbefehl. Echte Werte nur in `.env.test` eintragen; bestehende Dateien werden nicht überschrieben oder mit der Vorlage synchronisiert. Die pre-Skripte führen das Setup automatisch aus. `loadEnvFile` lädt anschließend die Variablen.
+
+`BASE_URL` enthält ausschließlich Schema, Host und optional Port. `APP_PATH` enthält den Application Context Path (z. B. `/meine-anwendung`); für eine Root-Anwendung leer lassen. Login- und Erfolgspfad sind relativ zur Anwendung. Die Konfiguration normalisiert den Context Path und erzeugt eine baseURL mit abschließendem Slash. Page Objects entfernen führende Slashes vor `page.goto`, damit der Context Path bei der URL-Auflösung erhalten bleibt. Beispiel: `http://localhost:8080/meine-anwendung/login.xhtml`. Die Origin-Allowlist enthält weiterhin nur Origins ohne Context Path.
 
 Nur dedizierte Testkonten verwenden. URLs, Meldungen und Locators sind Beispiele und müssen anhand der echten Anwendung geprüft werden. Keine Produktivsysteme verwenden.
 
@@ -160,9 +164,12 @@ if (!existsSync(envFile)) {
 }
 loadEnvFile(envFile);
 
-const baseURL = process.env.BASE_URL || 'http://localhost:8080';
+const origin = new URL(process.env.BASE_URL || 'http://localhost:8080');
+const appPath = (process.env.APP_PATH || '').trim().replace(/^\/+|\/+$/g, '');
+const baseURL = new URL(origin.origin);
+baseURL.pathname = appPath ? `/${appPath}/` : '/';
 const allowedOrigins = (process.env.E2E_ALLOWED_ORIGINS || 'http://localhost:8080,http://127.0.0.1:8080').split(',').map(value => value.trim());
-if (!allowedOrigins.includes(new URL(baseURL).origin)) {
+if (!allowedOrigins.includes(baseURL.origin)) {
   throw new Error('E2E target is not an approved test origin');
 }
 
@@ -193,7 +200,7 @@ export default defineConfig({
     ['junit', { outputFile: 'test-results/junit.xml' }]
   ],
   use: {
-    baseURL,
+    baseURL: baseURL.href,
     headless: true,
     actionTimeout: 10_000,
     navigationTimeout: 30_000,
@@ -352,7 +359,7 @@ export class LoginPage {
     if (!loginPath) {
       throw new Error('E2E_LOGIN_PATH is not configured');
     }
-    await this.page.goto(loginPath);
+    await this.page.goto(loginPath.replace(/^\/+/, ''));
   }
 
   async login(username: string, password: string): Promise<void> {
@@ -384,11 +391,13 @@ test.describe('Authentifizierung', () => {
     await expect(login.submitButton).toBeEnabled();
   });
 
-  test('Gültige Zugangsdaten', async ({ page }) => {
+  test('Gültige Zugangsdaten', async ({ page, baseURL }) => {
     const { E2E_USERNAME, E2E_PASSWORD } = process.env;
     if (!E2E_USERNAME || !E2E_PASSWORD) throw new Error('Testzugangsdaten fehlen');
     await login.login(E2E_USERNAME, E2E_PASSWORD);
-    await expect(page).toHaveURL(url => url.pathname === (process.env.E2E_SUCCESS_PATH || '/dashboard.xhtml'));
+    const successPath = (process.env.E2E_SUCCESS_PATH || '/dashboard.xhtml').replace(/^\/+/, '');
+    const expectedURL = new URL(successPath, baseURL);
+    await expect(page).toHaveURL(url => url.origin === expectedURL.origin && url.pathname === expectedURL.pathname);
     await expect(page.getByRole('button', { name: 'Abmelden' })).toBeVisible();
   });
 
@@ -449,7 +458,7 @@ npm --prefix frontend run test:e2e -- --project=edge
 npm --prefix frontend run test:e2e -- --grep 'Gültige Zugangsdaten'
 ```
 
-Codegen: `npm --prefix frontend run test:e2e:codegen -- http://localhost:8080/login.xhtml`. Generierten Code überarbeiten; keine aufgezeichneten Geheimnisse übernehmen.
+Codegen: `npm --prefix frontend run test:e2e:codegen -- http://localhost:8080/meine-anwendung/login.xhtml` (bei leerem APP_PATH ohne `/meine-anwendung`). Generierten Code überarbeiten; keine aufgezeichneten Geheimnisse übernehmen.
 
 ## 13. Playwright MCP
 
@@ -599,7 +608,7 @@ In `playwright.config.ts` ergänzen, sofern lokale Testumgebung und Maven Wrappe
 webServer: {
   command: './mvnw quarkus:dev',
   cwd: path.resolve(__dirname, '..'),
-  url: process.env.BASE_URL || 'http://localhost:8080',
+  url: baseURL.href, // aus Abschnitt 5; Anwendung inklusive Context Path
   reuseExistingServer: !process.env.CI,
   timeout: 180_000
 }
@@ -638,7 +647,7 @@ e2e:
       junit: frontend/test-results/junit.xml
 ```
 
-Voraussetzung: Linux-Runner mit Node.js 24 und vorinstalliertem Edge und vorhandenen Browser-Systemabhängigkeiten sowie eine bereits gestartete, erreichbare Testanwendung mit Testdatenbank. BASE_URL, E2E_ALLOWED_ORIGINS und Zugangsdaten über geschützte CI-Variablen setzen. Artefaktzugriff einschränken.
+Voraussetzung: Linux-Runner mit Node.js 24 und vorinstalliertem Edge und vorhandenen Browser-Systemabhängigkeiten sowie eine bereits gestartete, erreichbare Testanwendung mit Testdatenbank. BASE_URL, APP_PATH, E2E_ALLOWED_ORIGINS und Zugangsdaten über geschützte CI-Variablen setzen. Artefaktzugriff einschränken.
 
 ### Weitere Testarten
 
