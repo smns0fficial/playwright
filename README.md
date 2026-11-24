@@ -82,11 +82,14 @@ mkdir -p .agents/skills/playwright-e2e .opencode/agents
 
 ### Ubuntu ohne Internet: vorhandene Browser verwenden
 
-Edge ist vorinstalliert, Chrome wird separat manuell installiert. Keine `playwright install`- oder `install --with-deps`-Befehle ausführen. npm-Pakete müssen über die interne Registry oder einen vorbereiteten Cache verfügbar sein.
+Edge ist vorinstalliert, Chrome wird separat manuell installiert. Standardmäßig keine `playwright install`- oder `install --with-deps`-Befehle ausführen. Die optionalen Installationsskripte bleiben für Umgebungen mit freigegebenem Downloadzugriff erhalten. npm-Pakete müssen über die interne Registry oder einen vorbereiteten Cache verfügbar sein.
 
 ```bash
 which microsoft-edge || which microsoft-edge-stable
 which google-chrome || which google-chrome-stable
+# Pfade direkt für den aktuellen Shell-Prozess übernehmen:
+export EDGE_EXECUTABLE="$(which microsoft-edge || which microsoft-edge-stable)"
+export CHROME_EXECUTABLE="$(which google-chrome || which google-chrome-stable)"
 microsoft-edge --version
 google-chrome --version
 ```
@@ -123,8 +126,9 @@ BASE_URL=http://localhost:8080
 E2E_ALLOWED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080
 E2E_USERNAME=
 E2E_PASSWORD=
-EDGE_EXECUTABLE=/usr/bin/microsoft-edge
-CHROME_EXECUTABLE=/usr/bin/google-chrome
+# Optional: tatsächliche which-Ausgabe eintragen; leer = automatische Suche
+EDGE_EXECUTABLE=
+CHROME_EXECUTABLE=
 E2E_LOGIN_PATH=/login.xhtml
 E2E_SUCCESS_PATH=/dashboard.xhtml
 ```
@@ -143,6 +147,7 @@ Nur dedizierte Testkonten verwenden. URLs, Meldungen und Locators sind Beispiele
 import { defineConfig, devices } from '@playwright/test';
 import { loadEnvFile } from 'node:process';
 import { existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
 const envFile = path.resolve(__dirname, '.env.test');
@@ -154,6 +159,17 @@ const baseURL = process.env.BASE_URL || 'http://localhost:8080';
 const allowedOrigins = (process.env.E2E_ALLOWED_ORIGINS || 'http://localhost:8080,http://127.0.0.1:8080').split(',').map(value => value.trim());
 if (!allowedOrigins.includes(new URL(baseURL).origin)) {
   throw new Error('E2E target is not an approved test origin');
+}
+
+// Explizite Umgebungsvariable hat Vorrang, sonst lokale Binary über which suchen.
+function browserPath(override: string | undefined, ...names: string[]): string {
+  if (override) return override;
+  for (const name of names) {
+    try {
+      return execFileSync('which', [name], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    } catch { /* nächsten Binary-Namen versuchen */ }
+  }
+  throw new Error(`Browser nicht gefunden: ${names.join(', ')}. Pfad setzen oder Browser nach Freigabe installieren.`);
 }
 
 export default defineConfig({
@@ -183,14 +199,14 @@ export default defineConfig({
   },
   projects: [
     { name: 'edge', use: { ...devices['Desktop Edge'], channel: 'msedge',
-      launchOptions: { executablePath: process.env.EDGE_EXECUTABLE || '/usr/bin/microsoft-edge' } } },
+      launchOptions: { executablePath: browserPath(process.env.EDGE_EXECUTABLE, 'microsoft-edge', 'microsoft-edge-stable') } } },
     { name: 'chrome', use: { ...devices['Desktop Chrome'], channel: 'chrome',
-      launchOptions: { executablePath: process.env.CHROME_EXECUTABLE || '/usr/bin/google-chrome' } } }
+      launchOptions: { executablePath: browserPath(process.env.CHROME_EXECUTABLE, 'google-chrome', 'google-chrome-stable') } } }
   ]
 });
 ```
 
-Erst bei isolierten Testdaten parallelisieren. Edge ist der Standard über die npm-Skripte. Chrome ist zusätzlich verfügbar. `launchOptions.executablePath` verwendet exakt die angegebene lokale Binary; `channel` allein würde den üblichen Systeminstallationspfad verwenden. Fehlende oder inkompatible Browser führen zu einem Fehler, nicht zu einem automatischen Download. Für Videoaufzeichnungen kann Playwright zusätzlich sein eigenes FFmpeg benötigen; offline daher `video: 'off'` verwenden, sofern dieses nicht bereitgestellt wurde. Die Origin-Allowlist verhindert versehentliche Auswahl eines anderen Basisziels; sie ist keine Netzwerksandbox und verhindert keine externen Weiterleitungen. Nur ausdrücklich freigegebene Testumgebungen eintragen.
+Erst bei isolierten Testdaten parallelisieren. Edge ist der Standard über die npm-Skripte. Chrome ist zusätzlich verfügbar. Diese Beispielkonfiguration löst beide Browserpfade beim Laden auf und setzt daher beide installierten Browser voraus. `launchOptions.executablePath` verwendet exakt die angegebene lokale Binary; `channel` allein würde den üblichen Systeminstallationspfad verwenden. Fehlende oder inkompatible Browser führen zu einem Fehler, nicht zu einem automatischen Download. Für Videoaufzeichnungen kann Playwright zusätzlich sein eigenes FFmpeg benötigen; offline daher `video: 'off'` verwenden, sofern dieses nicht bereitgestellt wurde. Die Origin-Allowlist verhindert versehentliche Auswahl eines anderen Basisziels; sie ist keine Netzwerksandbox und verhindert keine externen Weiterleitungen. Nur ausdrücklich freigegebene Testumgebungen eintragen.
 
 ## 6. TypeScript
 
@@ -241,6 +257,8 @@ Datei: `frontend/package.json`. Beispiel für das gesamte npm-Projekt. Bestehend
     "test:e2e:typecheck": "tsc -p tsconfig.e2e.json",
     "test:e2e:codegen": "playwright codegen --channel=msedge",
     "test:e2e:all-browsers": "playwright test",
+    "test:e2e:install": "playwright install msedge chrome",
+    "test:e2e:install:ci": "playwright install --with-deps msedge chrome",
     "mcp:playwright": "playwright-mcp",
     "test:e2e:chrome": "playwright test --project=chrome",
     "test:e2e:edge": "playwright test --project=edge"
@@ -254,6 +272,15 @@ Datei: `frontend/package.json`. Beispiel für das gesamte npm-Projekt. Bestehend
     "clean-css-cli": "^5.6.3"
   }
 }
+```
+
+**Hinweis zu den optionalen Installationsskripten:** JSON unterstützt keine Kommentare. `test:e2e:install` und `test:e2e:install:ci` nur nach Prüfung und Freigabe des Zugriffs auf die benötigten Browser-Downloadserver bzw. Paketquellen ausführen. Die Installation kann vorhandene systemweite Chrome-/Edge-Installationen verändern und benötigt gegebenenfalls Administratorrechte. In der abgeschotteten Ubuntu-Umgebung überspringen. Standardmäßig werden vorhandene Binaries über `which` bzw. explizite Umgebungsvariablen verwendet.
+
+```bash
+# Nur bei bestätigtem Downloadzugriff und Freigabe:
+npm --prefix frontend run test:e2e:install
+# Optional auf einem dafür vorgesehenen CI-Runner:
+npm --prefix frontend run test:e2e:install:ci
 ```
 
 Reproduzierbare Installation aus dem Root:
@@ -421,7 +448,7 @@ Die Beispielversion `*` in der package.json ist durch die von npm gespeicherte k
 }
 ```
 
-Mit `opencode mcp list` prüfen und OpenCode neu starten. OpenCode aus dem Projekt-Root starten. Der lokale npm-Skriptaufruf nutzt den Paket-Binäreintrag statt eines fest codierten internen Dateipfads. Die Installation erfolgt im Frontend mit dessen .npmrc. MCP-Browser und Test-Runner-Kontexte sind getrennt. Den MCP-Pfad durch die Ausgabe von `which microsoft-edge` ersetzen; für Chrome `--browser chrome --executable-path /usr/bin/google-chrome` verwenden. Die verfügbaren Optionen mit dem lokal installierten MCP-Paket über `npm run mcp:playwright -- --help` prüfen. Keine Browserinstallation durch den Agenten auslösen.
+Mit `opencode mcp list` prüfen und OpenCode neu starten. OpenCode aus dem Projekt-Root starten. Der lokale npm-Skriptaufruf nutzt den Paket-Binäreintrag statt eines fest codierten internen Dateipfads. Die Installation erfolgt im Frontend mit dessen .npmrc. MCP-Browser und Test-Runner-Kontexte sind getrennt. Den MCP-Pfad durch die Ausgabe von `which microsoft-edge` ersetzen; alternativ kann ein Shell-Aufruf mit `--executable-path "$(which microsoft-edge || which microsoft-edge-stable)"` den Pfad dynamisch auflösen; für Chrome `--browser chrome --executable-path /usr/bin/google-chrome` verwenden. Die verfügbaren Optionen mit dem lokal installierten MCP-Paket über `npm run mcp:playwright -- --help` prüfen. Keine Browserinstallation durch den Agenten auslösen.
 
 ## 14. AGENTS.md ergänzen
 
@@ -431,7 +458,7 @@ Mit `opencode mcp list` prüfen und OpenCode neu starten. OpenCode aus dem Proje
 - npm project: frontend/
 - Tests: frontend/tests/e2e/
 - Use the playwright-e2e skill.
-- Use preinstalled Edge/Chrome only; never run browser download or installation commands.
+- Prefer preinstalled Edge/Chrome; resolve binaries with which or explicit environment variables. Never run optional browser installation scripts without confirmed download access and explicit approval.
 - Analyze XHTML, backing beans and expected behavior first.
 - Inspect the actual rendered DOM via browser MCP.
 - Prefer accessible, stable locators; account for JSF naming containers and AJAX.
