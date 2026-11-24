@@ -124,7 +124,7 @@ Die globale CLI ist optional und ersetzt nicht die lokale Projektabhängigkeit. 
 ```dotenv
 BASE_URL=http://localhost:8080
 # Optionaler Application Context Path; leer für Root-Anwendungen
-APP_PATH=/meine-anwendung
+BASE_APP_PATH=/meine-anwendung
 E2E_ALLOWED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080
 E2E_USERNAME=
 E2E_PASSWORD=
@@ -143,7 +143,7 @@ cp -n frontend/.env.test.example frontend/.env.test
 
 Das Setup legt `.env.test` nur an, wenn sie noch nicht existiert. npm-Skripte laufen im Verzeichnis der package.json, daher ohne `frontend/` im Kopierbefehl. Echte Werte nur in `.env.test` eintragen; bestehende Dateien werden nicht überschrieben oder mit der Vorlage synchronisiert. Die pre-Skripte führen das Setup automatisch aus. `loadEnvFile` lädt anschließend die Variablen.
 
-`BASE_URL` enthält ausschließlich Schema, Host und optional Port. `APP_PATH` enthält den Application Context Path (z. B. `/meine-anwendung`); für eine Root-Anwendung leer lassen. Login- und Erfolgspfad sind relativ zur Anwendung. Die Konfiguration normalisiert den Context Path und erzeugt eine baseURL mit abschließendem Slash. Page Objects entfernen führende Slashes vor `page.goto`, damit der Context Path bei der URL-Auflösung erhalten bleibt. Beispiel: `http://localhost:8080/meine-anwendung/login.xhtml`. Die Origin-Allowlist enthält weiterhin nur Origins ohne Context Path.
+`BASE_URL` enthält ausschließlich Schema, Host und optional Port. `BASE_APP_PATH` enthält den Application Context Path (z. B. `/meine-anwendung`); für eine Root-Anwendung leer lassen. Login- und Erfolgspfad sind relativ zur Anwendung. Die Konfiguration normalisiert den Context Path und erzeugt eine baseURL mit abschließendem Slash. Page Objects entfernen führende Slashes vor `page.goto`, damit der Context Path bei der URL-Auflösung erhalten bleibt. Beispiel: `http://localhost:8080/meine-anwendung/login.xhtml`. Die Origin-Allowlist enthält weiterhin nur Origins ohne Context Path.
 
 Nur dedizierte Testkonten verwenden. URLs, Meldungen und Locators sind Beispiele und müssen anhand der echten Anwendung geprüft werden. Keine Produktivsysteme verwenden.
 
@@ -165,7 +165,7 @@ if (!existsSync(envFile)) {
 loadEnvFile(envFile);
 
 const origin = new URL(process.env.BASE_URL || 'http://localhost:8080');
-const appPath = (process.env.APP_PATH || '').trim().replace(/^\/+|\/+$/g, '');
+const appPath = (process.env.BASE_APP_PATH || '').trim().replace(/^\/+|\/+$/g, '');
 const baseURL = new URL(origin.origin);
 baseURL.pathname = appPath ? `/${appPath}/` : '/';
 const allowedOrigins = (process.env.E2E_ALLOWED_ORIGINS || 'http://localhost:8080,http://127.0.0.1:8080').split(',').map(value => value.trim());
@@ -458,7 +458,7 @@ npm --prefix frontend run test:e2e -- --project=edge
 npm --prefix frontend run test:e2e -- --grep 'Gültige Zugangsdaten'
 ```
 
-Codegen: `npm --prefix frontend run test:e2e:codegen -- http://localhost:8080/meine-anwendung/login.xhtml` (bei leerem APP_PATH ohne `/meine-anwendung`). Generierten Code überarbeiten; keine aufgezeichneten Geheimnisse übernehmen.
+Codegen: `npm --prefix frontend run test:e2e:codegen -- http://localhost:8080/meine-anwendung/login.xhtml` (bei leerem BASE_APP_PATH ohne `/meine-anwendung`). Generierten Code überarbeiten; keine aufgezeichneten Geheimnisse übernehmen.
 
 ## 13. Playwright MCP
 
@@ -647,7 +647,7 @@ e2e:
       junit: frontend/test-results/junit.xml
 ```
 
-Voraussetzung: Linux-Runner mit Node.js 24 und vorinstalliertem Edge und vorhandenen Browser-Systemabhängigkeiten sowie eine bereits gestartete, erreichbare Testanwendung mit Testdatenbank. BASE_URL, APP_PATH, E2E_ALLOWED_ORIGINS und Zugangsdaten über geschützte CI-Variablen setzen. Artefaktzugriff einschränken.
+Voraussetzung: Linux-Runner mit Node.js 24 und vorinstalliertem Edge und vorhandenen Browser-Systemabhängigkeiten sowie eine bereits gestartete, erreichbare Testanwendung mit Testdatenbank. BASE_URL, BASE_APP_PATH, E2E_ALLOWED_ORIGINS und Zugangsdaten über geschützte CI-Variablen setzen. Artefaktzugriff einschränken.
 
 ### Weitere Testarten
 
