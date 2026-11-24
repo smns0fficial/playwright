@@ -134,8 +134,12 @@ E2E_SUCCESS_PATH=/dashboard.xhtml
 ```
 
 ```bash
-cp frontend/.env.test.example frontend/.env.test
+npm --prefix frontend run test:e2e:setup
+# Alternativ manuell:
+cp -n frontend/.env.test.example frontend/.env.test
 ```
+
+Das Setup legt `.env.test` nur an, wenn sie noch nicht existiert. npm-Skripte laufen im Verzeichnis der package.json, daher ohne `frontend/` im Kopierbefehl. Echte Werte nur in `.env.test` eintragen; bestehende Dateien werden nicht überschrieben oder mit der Vorlage synchronisiert. Die pre-Skripte führen das Setup automatisch aus. `loadEnvFile` lädt anschließend die Variablen.
 
 Nur dedizierte Testkonten verwenden. URLs, Meldungen und Locators sind Beispiele und müssen anhand der echten Anwendung geprüft werden. Keine Produktivsysteme verwenden.
 
@@ -151,9 +155,10 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
 const envFile = path.resolve(__dirname, '.env.test');
-if (existsSync(envFile)) {
-  loadEnvFile(envFile);
+if (!existsSync(envFile)) {
+  throw new Error(`Missing ${envFile}. Run npm --prefix frontend run test:e2e:setup`);
 }
+loadEnvFile(envFile);
 
 const baseURL = process.env.BASE_URL || 'http://localhost:8080';
 const allowedOrigins = (process.env.E2E_ALLOWED_ORIGINS || 'http://localhost:8080,http://127.0.0.1:8080').split(',').map(value => value.trim());
@@ -246,21 +251,32 @@ Datei: `frontend/package.json`. Beispiel für das gesamte npm-Projekt. Bestehend
   "scripts": {
     "build:css": "sass --no-source-map scss:css",
     "build": "npm run build:css",
+    "test:e2e:setup": "if [ ! -e .env.test ]; then cp .env.test.example .env.test; fi",
+    "pretest:e2e": "npm run test:e2e:setup",
     "test:e2e": "playwright test --project=edge",
+    "pretest:e2e:login": "npm run test:e2e:setup",
     "test:e2e:login": "playwright test --project=edge login.spec.ts",
+    "pretest:e2e:ui": "npm run test:e2e:setup",
     "test:e2e:ui": "playwright test --project=edge --ui",
+    "pretest:e2e:headed": "npm run test:e2e:setup",
     "test:e2e:headed": "playwright test --project=edge --headed",
+    "pretest:e2e:debug": "npm run test:e2e:setup",
     "test:e2e:debug": "playwright test --project=edge --debug",
     "test:e2e:report": "playwright show-report",
+    "pretest:e2e:list": "npm run test:e2e:setup",
     "test:e2e:list": "playwright test --project=edge --list",
+    "pretest:e2e:failed": "npm run test:e2e:setup",
     "test:e2e:failed": "playwright test --project=edge --last-failed",
     "test:e2e:typecheck": "tsc -p tsconfig.e2e.json",
     "test:e2e:codegen": "playwright codegen --channel=msedge",
+    "pretest:e2e:all-browsers": "npm run test:e2e:setup",
     "test:e2e:all-browsers": "playwright test",
     "test:e2e:install": "playwright install msedge chrome",
     "test:e2e:install:ci": "playwright install --with-deps msedge chrome",
     "mcp:playwright": "playwright-mcp",
+    "pretest:e2e:chrome": "npm run test:e2e:setup",
     "test:e2e:chrome": "playwright test --project=chrome",
+    "pretest:e2e:edge": "npm run test:e2e:setup",
     "test:e2e:edge": "playwright test --project=edge"
   },
   "devDependencies": {
@@ -329,7 +345,11 @@ export class LoginPage {
   }
 
   async goto(): Promise<void> {
-    await this.page.goto(process.env.E2E_LOGIN_PATH || '/login.xhtml');
+    const loginPath = process.env.E2E_LOGIN_PATH;
+    if (!loginPath) {
+      throw new Error('E2E_LOGIN_PATH is not configured');
+    }
+    await this.page.goto(loginPath);
   }
 
   async login(username: string, password: string): Promise<void> {
@@ -403,11 +423,16 @@ Bei nativer HTML5-Validierung stattdessen gegebenenfalls `validity` prüfen. Erw
 
 Für falsche Passwörter ein dediziertes Testkonto ohne unbeabsichtigte Sperrfolgen verwenden. Geschützte URLs direkt in einem frischen Browserkontext aufrufen und sowohl Weiterleitung als auch fehlenden Zugriff prüfen. Logout anschließend durch erneuten Zugriff auf die geschützte Ressource verifizieren. Die Tabelle oben ist ein Testplan, nicht die Behauptung, dass alle Szenarien bereits implementiert sind.
 
+### Fehlersuche: Umgebungsvariablen
+
+Bei fehlendem `E2E_LOGIN_PATH` die tatsächliche `.env.test` prüfen. Nach `loadEnvFile(envFile)` temporär `console.log(envFile, existsSync(envFile));` und `console.log(process.env.E2E_LOGIN_PATH);` ergänzen. Keine Zugangsdaten protokollieren. Bereits gesetzte Prozessvariablen haben Vorrang. Nach Änderungen den UI-Modus vollständig neu starten. Page Objects greifen direkt auf `process.env` zu; dotenv ist nicht erforderlich. Der Login-Pfad hat bewusst keinen stillen Fallback.
+
 ## 12. Ausführung
 
 Quarkus im Root starten: `./mvnw quarkus:dev` (alternativ `mvn quarkus:dev`). In einem zweiten Terminal:
 
 ```bash
+npm --prefix frontend run test:e2e:setup
 npm --prefix frontend run test:e2e:typecheck
 npm --prefix frontend run test:e2e:login
 npm --prefix frontend run test:e2e
@@ -661,6 +686,8 @@ Die Konfiguration ist eine Vorlage und wurde nicht gegen das tatsächliche Repos
 - npm-Referenz: https://docs.npmjs.com/cli/commands/npm-install
 - Browser-Verwaltung: https://playwright.dev/docs/browsers
 
+- [npm – Pre- und Post-Skripte](https://docs.npmjs.com/cli/v11/using-npm/scripts#pre--post-scripts)
+- [GNU Coreutils – cp](https://www.gnu.org/software/coreutils/manual/html_node/cp-invocation.html)
 - [Node.js 24 – loadEnvFile](https://nodejs.org/docs/latest-v24.x/api/process.html#processloadenvfilepath)
 - [npm – engines](https://docs.npmjs.com/cli/configuring-npm/package-json#engines)
 - [npm – engine-strict](https://docs.npmjs.com/cli/using-npm/config#engine-strict)
