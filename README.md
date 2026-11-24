@@ -1,6 +1,31 @@
 # Playwright E2E Testing mit OpenCode
 
-Java 21 · Quarkus 3 · Jakarta EE 10 · MyFaces · PrimeFaces 15 · TypeScript
+Java 21 · Quarkus 3 · Jakarta EE 10 · MyFaces · PrimeFaces 15 · Node.js 24 LTS · TypeScript
+
+## Inhaltsverzeichnis
+
+- [1. Architektur](#1-architektur)
+- [2. Projektstruktur](#2-projektstruktur)
+- [3. Voraussetzungen und Installation](#3-voraussetzungen-und-installation)
+- [4. Testumgebung](#4-testumgebung)
+- [5. Playwright-Konfiguration](#5-playwright-konfiguration)
+- [6. TypeScript](#6-typescript)
+- [7. Vollständige package.json](#7-vollständige-packagejson)
+- [8. Gitignore](#8-gitignore)
+- [9. JSF- und PrimeFaces-Locators](#9-jsf--und-primefaces-locators)
+- [10. Login Page Object](#10-login-page-object)
+- [11. Login-Tests](#11-login-tests)
+- [12. Ausführung](#12-ausführung)
+- [13. Playwright MCP](#13-playwright-mcp)
+- [14. AGENTS.md ergänzen](#14-agentsmd-ergänzen)
+- [15. Spezialisierter Agent](#15-spezialisierter-agent)
+- [16. Wiederverwendbarer Skill](#16-wiederverwendbarer-skill)
+- [17. Erster Agentenauftrag](#17-erster-agentenauftrag)
+- [18. Authentifizierung für weitere Tests](#18-authentifizierung-für-weitere-tests)
+- [19. Optionaler automatischer Quarkus-Start](#19-optionaler-automatischer-quarkus-start)
+- [20. CI/CD](#20-cicd)
+- [21. Checkliste](#21-checkliste)
+- [22. Offizielle Dokumentation](#22-offizielle-dokumentation)
 
 ## 1. Architektur
 
@@ -84,6 +109,7 @@ Die globale CLI ist optional und ersetzt nicht die lokale Projektabhängigkeit. 
 
 ```dotenv
 BASE_URL=http://localhost:8080
+E2E_ALLOWED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080
 E2E_USERNAME=
 E2E_PASSWORD=
 E2E_LOGIN_PATH=/login.xhtml
@@ -111,7 +137,14 @@ if (existsSync(envFile)) {
   loadEnvFile(envFile);
 }
 
+const baseURL = process.env.BASE_URL || 'http://localhost:8080';
+const allowedOrigins = (process.env.E2E_ALLOWED_ORIGINS || 'http://localhost:8080,http://127.0.0.1:8080').split(',').map(value => value.trim());
+if (!allowedOrigins.includes(new URL(baseURL).origin)) {
+  throw new Error('E2E target is not an approved test origin');
+}
+
 export default defineConfig({
+  tsconfig: './tsconfig.e2e.json',
   testDir: './tests/e2e/specs',
   outputDir: './test-results',
   fullyParallel: false,
@@ -126,7 +159,7 @@ export default defineConfig({
     ['junit', { outputFile: 'test-results/junit.xml' }]
   ],
   use: {
-    baseURL: process.env.BASE_URL || 'http://localhost:8080',
+    baseURL,
     headless: true,
     actionTimeout: 10_000,
     navigationTimeout: 30_000,
@@ -135,11 +168,15 @@ export default defineConfig({
     video: 'retain-on-failure',
     ignoreHTTPSErrors: false
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }]
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'chrome', use: { ...devices['Desktop Chrome'], channel: 'chrome' } },
+    { name: 'edge', use: { ...devices['Desktop Edge'], channel: 'msedge' } }
+  ]
 });
 ```
 
-Erst bei isolierten Testdaten parallelisieren. Optional Chrome und Edge als zusätzliche Projekte mit `channel: 'chrome'` bzw. `channel: 'msedge'` und passenden Desktop-Geräteprofilen ergänzen; Browser müssen installiert sein.
+Erst bei isolierten Testdaten parallelisieren. Chromium ist der Standard über die npm-Skripte. Chrome und Edge sind optional und müssen für ihre jeweiligen Testläufe installiert sein. Die Origin-Allowlist verhindert versehentliche Auswahl eines anderen Basisziels; sie ist keine Netzwerksandbox und verhindert keine externen Weiterleitungen. Nur ausdrücklich freigegebene Testumgebungen eintragen.
 
 ## 6. TypeScript
 
@@ -179,16 +216,18 @@ Datei: `frontend/package.json`. Beispiel für das gesamte npm-Projekt. Bestehend
   "scripts": {
     "build:css": "sass --no-source-map scss:css",
     "build": "npm run build:css",
-    "test:e2e": "playwright test",
-    "test:e2e:login": "playwright test login.spec.ts",
-    "test:e2e:ui": "playwright test --ui",
-    "test:e2e:headed": "playwright test --headed",
-    "test:e2e:debug": "playwright test --debug",
+    "test:e2e": "playwright test --project=chromium",
+    "test:e2e:login": "playwright test --project=chromium login.spec.ts",
+    "test:e2e:ui": "playwright test --project=chromium --ui",
+    "test:e2e:headed": "playwright test --project=chromium --headed",
+    "test:e2e:debug": "playwright test --project=chromium --debug",
     "test:e2e:report": "playwright show-report",
-    "test:e2e:list": "playwright test --list",
-    "test:e2e:failed": "playwright test --last-failed",
+    "test:e2e:list": "playwright test --project=chromium --list",
+    "test:e2e:failed": "playwright test --project=chromium --last-failed",
     "test:e2e:typecheck": "tsc -p tsconfig.e2e.json",
     "test:e2e:codegen": "playwright codegen",
+    "test:e2e:all-browsers": "playwright test",
+    "mcp:playwright": "playwright-mcp",
     "test:e2e:install": "playwright install chromium",
     "test:e2e:install:ci": "playwright install --with-deps chromium",
     "test:e2e:chromium": "playwright test --project=chromium",
@@ -197,6 +236,7 @@ Datei: `frontend/package.json`. Beispiel für das gesamte npm-Projekt. Bestehend
   },
   "devDependencies": {
     "@playwright/test": "^1.56.0",
+    "@playwright/mcp": "*",
     "typescript": "^5.9.0",
     "@types/node": "^24.0.0",
     "sass": "^1.93.0",
@@ -321,6 +361,10 @@ Bei nativer HTML5-Validierung stattdessen gegebenenfalls `validity` prüfen. Erw
 | LOGIN-12 | Abgelaufene Sitzung | Erneute Anmeldung |
 | LOGIN-13 | Rollen | Berechtigungen eingehalten |
 
+### Ergänzende Login-Szenarien
+
+Für falsche Passwörter ein dediziertes Testkonto ohne unbeabsichtigte Sperrfolgen verwenden. Geschützte URLs direkt in einem frischen Browserkontext aufrufen und sowohl Weiterleitung als auch fehlenden Zugriff prüfen. Logout anschließend durch erneuten Zugriff auf die geschützte Ressource verifizieren. Die Tabelle oben ist ein Testplan, nicht die Behauptung, dass alle Szenarien bereits implementiert sind.
+
 ## 12. Ausführung
 
 Quarkus im Root starten: `./mvnw quarkus:dev` (alternativ `mvn quarkus:dev`). In einem zweiten Terminal:
@@ -343,7 +387,15 @@ Codegen: `npm --prefix frontend run test:e2e:codegen -- http://localhost:8080/lo
 
 ## 13. Playwright MCP
 
-Optional zusätzlich zu vorhandenen Chrome-/Edge-MCP-Servern. In `opencode.json` integrieren:
+Optional zusätzlich zu vorhandenen Chrome-/Edge-MCP-Servern. Für reproduzierbare Installationen lokal installieren:
+
+```bash
+cd frontend
+npm install -D --save-exact @playwright/mcp
+npm run mcp:playwright -- --help
+```
+
+Die Beispielversion `*` in der package.json ist durch die von npm gespeicherte konkrete Version zu ersetzen. In `opencode.json` integrieren:
 
 ```json
 {
@@ -351,14 +403,14 @@ Optional zusätzlich zu vorhandenen Chrome-/Edge-MCP-Servern. In `opencode.json`
   "mcp": {
     "playwright": {
       "type": "local",
-      "command": ["npx", "-y", "@playwright/mcp@latest"],
+      "command": ["npm", "--prefix", "frontend", "--silent", "run", "mcp:playwright"],
       "enabled": true
     }
   }
 }
 ```
 
-Mit `opencode mcp list` prüfen und OpenCode neu starten. Nach Erprobung konkrete Paketversion fixieren. Bei interner Registry beachten, dass die frontend/.npmrc im Root nicht automatisch gilt. MCP-Browser und Test-Runner-Kontexte sind getrennt.
+Mit `opencode mcp list` prüfen und OpenCode neu starten. OpenCode aus dem Projekt-Root starten. Der lokale npm-Skriptaufruf nutzt den Paket-Binäreintrag statt eines fest codierten internen Dateipfads. Die Installation erfolgt im Frontend mit dessen .npmrc. MCP-Browser und Test-Runner-Kontexte sind getrennt.
 
 ## 14. AGENTS.md ergänzen
 
@@ -390,7 +442,20 @@ description: Implements and analyzes Playwright E2E tests for Quarkus JSF PrimeF
 mode: subagent
 temperature: 0.1
 permission:
-  edit: allow
+  edit:
+    "*": ask
+    "frontend/tests/e2e/**": allow
+    "frontend/playwright.config.ts": allow
+    "frontend/tsconfig.e2e.json": allow
+    "frontend/package.json": ask
+    "frontend/package-lock.json": ask
+    "src/**": deny
+    "**/.env.test": deny
+  read:
+    "*": allow
+    "**/.env.test": deny
+    "**/.env.test.local": deny
+    "**/playwright/.auth/**": deny
   bash:
     "*": ask
     "npm --prefix frontend run test:e2e": allow
@@ -404,7 +469,7 @@ Analyze source code and requirements, inspect the running application, implement
 Never modify business logic without authorization. Never expose credentials or access production systems. Stop on missing test data or unavailable environments.
 ```
 
-Berechtigungen sind keine vollständige Sandbox; npm-Skripte können beliebigen Code ausführen. Vor Freigabe prüfen.
+Die Regeln müssen mit der eingesetzten OpenCode-Version geprüft werden. Zugangsdaten ausschließlich durch den Runner laden; auch Browser-MCP, Bash und Artefakte können Geheimnisse offenlegen. Berechtigungen sind keine vollständige Sandbox; npm-Skripte können beliebigen Code ausführen. Vor Freigabe prüfen.
 
 ## 16. Wiederverwendbarer Skill
 
@@ -427,6 +492,18 @@ description: Implement, execute and analyze Playwright E2E tests for Quarkus JSF
 9. Verification: Fix test defects only; rerun up to three correction cycles. Do not weaken assertions or suppress failures.
 10. Reporting: List environment, browser, passed/failed/skipped/flaky tests, defects, changed files, artifacts and remaining blockers.
 ```
+
+### Optionale Agentenaufteilung: Planner, Generator, Healer
+
+Playwright dokumentiert drei spezialisierte Testagenten. Für OpenCode können deren Rollen als eigene Subagenten umgesetzt werden; die offiziellen Definitionen nicht ungeprüft übernehmen.
+
+| Rolle | Aufgabe | Rechte |
+|---|---|---|
+| Planner | DOM und Anforderungen analysieren, Testplan erstellen | Lesen, Browser-Inspektion |
+| Generator | Testplan in Page Objects und Specs umsetzen | Testdateien bearbeiten, Tests ausführen |
+| Healer | Fehler klassifizieren und Testdefekte korrigieren | Testdateien bearbeiten, begrenzte Wiederholungen |
+
+Zunächst genügt der e2e-tester als kombinierter Agent. Bei einer Aufteilung bleiben fachliche Assertions verbindlich; der Healer darf keine Anwendungsfehler kaschieren. Siehe [Playwright Test Agents](https://playwright.dev/docs/test-agents).
 
 ## 17. Erster Agentenauftrag
 
@@ -474,6 +551,35 @@ CI=true npm --prefix frontend run test:e2e
 ```
 
 Zugangsdaten über CI-Secrets bereitstellen. HTML-Bericht, JUnit-XML, Screenshots, Traces und Videos als zugriffsgeschützte Artefakte sichern, auch bei Fehlschlägen.
+
+### GitLab CI – Beispiel
+
+```yaml
+e2e:
+  stage: test
+  script:
+    - npm --prefix frontend ci
+    - npm --prefix frontend run test:e2e:install:ci
+    - npm --prefix frontend run test:e2e:typecheck
+    - npm --prefix frontend run test:e2e
+  artifacts:
+    when: always
+    expire_in: 7 days
+    paths:
+      - frontend/playwright-report/
+      - frontend/test-results/
+    reports:
+      junit: frontend/test-results/junit.xml
+```
+
+Voraussetzung: Linux-Runner mit Node.js 24 und Berechtigung zur Installation der Browser-Systemabhängigkeiten sowie eine bereits gestartete, erreichbare Testanwendung mit Testdatenbank. BASE_URL, E2E_ALLOWED_ORIGINS und Zugangsdaten über geschützte CI-Variablen setzen. Artefaktzugriff einschränken.
+
+### Weitere Testarten
+
+- DataTable: Filter, Sortierung, Pagination und AJAX-Updates über sichtbare Zeilen und fachliche Ergebnisse prüfen; keine festen Wartezeiten.
+- Accessibility: optional `@axe-core/playwright` installieren und mit AxeBuilder prüfen; automatisierte Prüfungen ersetzen keine manuelle Barrierefreiheitsprüfung.
+- API: Playwrights `request`-Fixture für dedizierte Testendpunkte verwenden; Status und Antwortinhalt prüfen.
+- Visual Regression: `expect(page).toHaveScreenshot()` nur mit stabiler Browser-/OS-Umgebung und kontrollierten Testdaten verwenden; Baselines bewusst reviewen.
 
 ## 21. Checkliste
 
