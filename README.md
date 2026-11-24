@@ -1,6 +1,6 @@
 # Playwright E2E Testing mit OpenCode
 
-Java · Quarkus · Jakarta EE · MyFaces · PrimeFaces · TypeScript
+Java 21 · Quarkus 3 · Jakarta EE 10 · MyFaces · PrimeFaces 15 · TypeScript
 
 ## 1. Architektur
 
@@ -56,6 +56,26 @@ mkdir -p .agents/skills/playwright-e2e .opencode/agents
 ```
 
 Optional: `npx playwright install firefox webkit` im Frontend-Verzeichnis. Unter Linux/CI: `npx playwright install --with-deps chromium`.
+
+### Bedeutung der npm-Pakete
+
+| Paket | Aufgabe |
+|---|---|
+| `@playwright/test` | Test Runner, Browsersteuerung, Assertions und Reporting |
+| `typescript` | Statische Typprüfung mit tsc |
+| `@types/node` | Node.js-Typdefinitionen, etwa für process.env |
+| `dotenv` | Laden der lokalen .env.test |
+
+`-D` speichert die Pakete als devDependencies in der package.json. Die package-lock.json wird ebenfalls aktualisiert.
+
+### Optionale globale Installation
+
+```bash
+npm install -g @playwright/test
+playwright --version
+```
+
+Die globale CLI ist optional und ersetzt nicht die lokale Projektabhängigkeit. Für Projekttests stets die lokale Version über npm-Skripte verwenden. Browser-Binaries werden unter Linux standardmäßig in `~/.cache/ms-playwright/` gespeichert; kompatible Versionen können diesen Cache gemeinsam nutzen.
 
 ## 4. Testumgebung
 
@@ -138,13 +158,19 @@ Erst bei isolierten Testdaten parallelisieren. Optional Chrome und Edge als zus�
 
 Playwright transpiliert TypeScript; die separate Typprüfung bleibt sinnvoll. Bei ESM Imports entsprechend anpassen.
 
-## 7. npm-Skripte
+## 7. Vollständige package.json
 
-In die bestehenden `scripts` der `frontend/package.json` integrieren:
+Datei: `frontend/package.json`. Beispiel für das gesamte npm-Projekt. Bestehende Build-Skripte, Sass-Pfade und Abhängigkeiten beibehalten. Die Versionsnummern sind Beispiele, keine verifizierten aktuellen Versionen; die tatsächlichen Versionen durch npm install auflösen lassen. Chrome und Edge setzen entsprechende Playwright-Projekte und installierte Browser voraus.
 
 ```json
 {
+  "name": "frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Frontend build and automated end-to-end testing",
   "scripts": {
+    "build:css": "sass --no-source-map scss:css",
+    "build": "npm run build:css",
     "test:e2e": "playwright test",
     "test:e2e:login": "playwright test login.spec.ts",
     "test:e2e:ui": "playwright test --ui",
@@ -154,9 +180,29 @@ In die bestehenden `scripts` der `frontend/package.json` integrieren:
     "test:e2e:list": "playwright test --list",
     "test:e2e:failed": "playwright test --last-failed",
     "test:e2e:typecheck": "tsc -p tsconfig.e2e.json",
-    "test:e2e:codegen": "playwright codegen"
+    "test:e2e:codegen": "playwright codegen",
+    "test:e2e:install": "playwright install chromium",
+    "test:e2e:install:ci": "playwright install --with-deps chromium",
+    "test:e2e:chromium": "playwright test --project=chromium",
+    "test:e2e:chrome": "playwright test --project=chrome",
+    "test:e2e:edge": "playwright test --project=edge"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "typescript": "^5.9.0",
+    "@types/node": "^22.0.0",
+    "dotenv": "^17.0.0",
+    "sass": "^1.93.0",
+    "clean-css-cli": "^5.6.3"
   }
 }
+```
+
+Reproduzierbare Installation aus dem Root:
+
+```bash
+npm --prefix frontend ci
+npm --prefix frontend run test:e2e:install
 ```
 
 ## 8. Gitignore
@@ -311,6 +357,7 @@ Mit `opencode mcp list` prüfen und OpenCode neu starten. Nach Erprobung konkret
 
 ```markdown
 ## End-to-End Testing
+- Stack: Java 21, Quarkus 3, Jakarta EE 10, MyFaces, PrimeFaces 15, TypeScript.
 - npm project: frontend/
 - Tests: frontend/tests/e2e/
 - Use the playwright-e2e skill.
@@ -332,7 +379,7 @@ Mit `opencode mcp list` prüfen und OpenCode neu starten. Nach Erprobung konkret
 
 ```markdown
 ---
-description: Implements and analyzes Playwright E2E tests for Quarkus JSF PrimeFaces applications.
+description: Implements and analyzes Playwright E2E tests for Quarkus JSF PrimeFaces 15 applications.
 mode: subagent
 temperature: 0.1
 permission:
@@ -359,7 +406,7 @@ Berechtigungen sind keine vollständige Sandbox; npm-Skripte können beliebigen 
 ```markdown
 ---
 name: playwright-e2e
-description: Implement, execute and analyze Playwright E2E tests for Quarkus JSF PrimeFaces applications.
+description: Implement, execute and analyze Playwright E2E tests for Quarkus JSF PrimeFaces 15 applications.
 ---
 # Workflow
 1. Discovery: Read AGENTS.md, existing tests, XHTML, backing beans and authentication logic.
@@ -456,6 +503,9 @@ Zugangsdaten über CI-Secrets bereitstellen. HTML-Bericht, JUnit-XML, Screenshot
 - [OpenCode Permissions](https://opencode.ai/docs/permissions/)
 - [Quarkus Testing](https://quarkus.io/guides/getting-started-testing)
 - [Jakarta Faces](https://jakarta.ee/specifications/faces/)
-- [PrimeFaces 13](https://primefaces.github.io/primefaces/13_0_0/)
+- [PrimeFaces 15](https://primefaces.github.io/primefaces/15_0_0/)
 
 Die Konfiguration ist eine Vorlage und wurde nicht gegen das tatsächliche Repository ausgeführt. Nächster Schritt: echte Login-Seite und Authentifizierungslogik prüfen.
+
+- npm-Referenz: https://docs.npmjs.com/cli/commands/npm-install
+- Browser-Verwaltung: https://playwright.dev/docs/browsers
