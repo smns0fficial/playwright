@@ -39,7 +39,7 @@ project-root/
 
 ## 3. Voraussetzungen und Installation
 
-Eine von Playwright unterstützte Node.js-LTS-Version verwenden. Bestehendes npm-Projekt und .npmrc beibehalten.
+Node.js 24 LTS verwenden. Bestehendes npm-Projekt und .npmrc beibehalten. Optional `engine-strict=true` in `frontend/.npmrc` ergänzen, um die Node-Version bei npm-Installationen durchzusetzen.
 
 ```bash
 node --version
@@ -47,7 +47,7 @@ npm --version
 java --version
 opencode --version
 cd frontend
-npm install -D @playwright/test typescript @types/node dotenv
+npm install -D @playwright/test typescript @types/node@24
 npx playwright install chromium
 npx playwright --version
 cd ..
@@ -63,8 +63,9 @@ Optional: `npx playwright install firefox webkit` im Frontend-Verzeichnis. Unter
 |---|---|
 | `@playwright/test` | Test Runner, Browsersteuerung, Assertions und Reporting |
 | `typescript` | Statische Typprüfung mit tsc |
-| `@types/node` | Node.js-Typdefinitionen, etwa für process.env |
-| `dotenv` | Laden der lokalen .env.test |
+| `@types/node@24` | Node.js-24-Typdefinitionen, etwa für process.env |
+
+Node.js 24 unterstützt `.env`-Dateien nativ über `loadEnvFile`. Das Paket `dotenv` ist daher nicht erforderlich. Falls es bereits installiert ist und nicht anderweitig benötigt wird, kann es mit `npm uninstall dotenv` entfernt werden.
 
 `-D` speichert die Pakete als devDependencies in der package.json. Die package-lock.json wird ebenfalls aktualisiert.
 
@@ -101,10 +102,14 @@ Nur dedizierte Testkonten verwenden. URLs, Meldungen und Locators sind Beispiele
 
 ```typescript
 import { defineConfig, devices } from '@playwright/test';
-import dotenv from 'dotenv';
+import { loadEnvFile } from 'node:process';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
-dotenv.config({ path: path.resolve(__dirname, '.env.test') });
+const envFile = path.resolve(__dirname, '.env.test');
+if (existsSync(envFile)) {
+  loadEnvFile(envFile);
+}
 
 export default defineConfig({
   testDir: './tests/e2e/specs',
@@ -168,6 +173,9 @@ Datei: `frontend/package.json`. Beispiel für das gesamte npm-Projekt. Bestehend
   "version": "1.0.0",
   "private": true,
   "description": "Frontend build and automated end-to-end testing",
+  "engines": {
+    "node": ">=24.0.0 <25.0.0"
+  },
   "scripts": {
     "build:css": "sass --no-source-map scss:css",
     "build": "npm run build:css",
@@ -190,8 +198,7 @@ Datei: `frontend/package.json`. Beispiel für das gesamte npm-Projekt. Bestehend
   "devDependencies": {
     "@playwright/test": "^1.56.0",
     "typescript": "^5.9.0",
-    "@types/node": "^22.0.0",
-    "dotenv": "^17.0.0",
+    "@types/node": "^24.0.0",
     "sass": "^1.93.0",
     "clean-css-cli": "^5.6.3"
   }
@@ -509,3 +516,7 @@ Die Konfiguration ist eine Vorlage und wurde nicht gegen das tatsächliche Repos
 
 - npm-Referenz: https://docs.npmjs.com/cli/commands/npm-install
 - Browser-Verwaltung: https://playwright.dev/docs/browsers
+
+- [Node.js 24 – loadEnvFile](https://nodejs.org/docs/latest-v24.x/api/process.html#processloadenvfilepath)
+- [npm – engines](https://docs.npmjs.com/cli/configuring-npm/package-json#engines)
+- [npm – engine-strict](https://docs.npmjs.com/cli/using-npm/config#engine-strict)
