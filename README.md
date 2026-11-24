@@ -252,31 +252,32 @@ Datei: `frontend/package.json`. Beispiel für das gesamte npm-Projekt. Bestehend
     "build:css": "sass --no-source-map scss:css",
     "build": "npm run build:css",
     "test:e2e:setup": "if [ ! -e .env.test ]; then cp .env.test.example .env.test; fi",
-    "pretest:e2e": "npm run test:e2e:setup",
+    "test:e2e:browser:versions": "(google-chrome --version || google-chrome-stable --version) && (microsoft-edge --version || microsoft-edge-stable --version)",
+    "pretest:e2e": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
     "test:e2e": "playwright test --project=edge",
-    "pretest:e2e:login": "npm run test:e2e:setup",
+    "pretest:e2e:login": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
     "test:e2e:login": "playwright test --project=edge login.spec.ts",
-    "pretest:e2e:ui": "npm run test:e2e:setup",
+    "pretest:e2e:ui": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
     "test:e2e:ui": "playwright test --project=edge --ui",
-    "pretest:e2e:headed": "npm run test:e2e:setup",
+    "pretest:e2e:headed": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
     "test:e2e:headed": "playwright test --project=edge --headed",
-    "pretest:e2e:debug": "npm run test:e2e:setup",
+    "pretest:e2e:debug": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
     "test:e2e:debug": "playwright test --project=edge --debug",
     "test:e2e:report": "playwright show-report",
-    "pretest:e2e:list": "npm run test:e2e:setup",
+    "pretest:e2e:list": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
     "test:e2e:list": "playwright test --project=edge --list",
-    "pretest:e2e:failed": "npm run test:e2e:setup",
+    "pretest:e2e:failed": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
     "test:e2e:failed": "playwright test --project=edge --last-failed",
     "test:e2e:typecheck": "tsc -p tsconfig.e2e.json",
     "test:e2e:codegen": "playwright codegen --channel=msedge",
-    "pretest:e2e:all-browsers": "npm run test:e2e:setup",
+    "pretest:e2e:all-browsers": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
     "test:e2e:all-browsers": "playwright test",
     "test:e2e:install": "playwright install msedge chrome",
     "test:e2e:install:ci": "playwright install --with-deps msedge chrome",
     "mcp:playwright": "playwright-mcp",
-    "pretest:e2e:chrome": "npm run test:e2e:setup",
+    "pretest:e2e:chrome": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
     "test:e2e:chrome": "playwright test --project=chrome",
-    "pretest:e2e:edge": "npm run test:e2e:setup",
+    "pretest:e2e:edge": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
     "test:e2e:edge": "playwright test --project=edge"
   },
   "devDependencies": {
@@ -289,6 +290,8 @@ Datei: `frontend/package.json`. Beispiel für das gesamte npm-Projekt. Bestehend
   }
 }
 ```
+
+**Browser-Versionsprüfung:** `npm --prefix frontend run test:e2e:browser:versions` gibt die Versionen der lokal installierten Chrome- und Edge-Binaries aus (jeweils mit alternativem `-stable`-Namen). Alle pretest-Skripte für Playwright-Testläufe führen zuerst das Setup und anschließend diese Prüfung aus. Schlägt eine der beiden Prüfungen fehl, startet der Test nicht. Es werden keine Browser heruntergeladen. Die Versionsprüfung verwendet die Binaries aus `PATH`; bei expliziten `EDGE_EXECUTABLE`-/`CHROME_EXECUTABLE`-Overrides kann die tatsächlich verwendete Binary davon abweichen. Die Versionsausgabe allein bestätigt keine Playwright-Kompatibilität.
 
 **Hinweis zu den optionalen Installationsskripten:** JSON unterstützt keine Kommentare. `test:e2e:install` und `test:e2e:install:ci` nur nach Prüfung und Freigabe des Zugriffs auf die benötigten Browser-Downloadserver bzw. Paketquellen ausführen. Die Installation kann vorhandene systemweite Chrome-/Edge-Installationen verändern und benötigt gegebenenfalls Administratorrechte. In der abgeschotteten Ubuntu-Umgebung überspringen. Standardmäßig werden vorhandene Binaries über `which` bzw. explizite Umgebungsvariablen verwendet.
 
