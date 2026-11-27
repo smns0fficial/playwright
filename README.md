@@ -140,7 +140,7 @@ npm --prefix frontend run test:e2e:setup
 cp -n frontend/.env.test.example frontend/.env.test
 ```
 
-Das Setup legt `.env.test` nur an, wenn sie noch nicht existiert. npm-Skripte laufen im Verzeichnis der package.json, daher ohne `frontend/` im Kopierbefehl. Echte Werte nur in `.env.test` eintragen; bestehende Dateien werden nicht überschrieben oder mit der Vorlage synchronisiert. Die pre-Skripte führen das Setup automatisch aus. `loadEnvFile` lädt anschließend die Variablen.
+Das Setup legt `.env.test` nur an, wenn sie noch nicht existiert. npm-Skripte laufen im Verzeichnis der package.json, daher ohne `frontend/` im Kopierbefehl. Echte Werte nur in `.env.test` eintragen; bestehende Dateien werden nicht überschrieben oder mit der Vorlage synchronisiert. Die pre-Skripte für Standardtests und UI führen das Setup automatisch aus. `loadEnvFile` lädt anschließend die Variablen.
 
 `BASE_URL` enthält ausschließlich Schema, Host und optional Port. `BASE_APP_PATH` enthält den Application Context Path (z. B. `/meine-anwendung`); für eine Root-Anwendung leer lassen. Login- und Erfolgspfad sind relativ zur Anwendung. Die Konfiguration normalisiert den Context Path und erzeugt eine baseURL mit abschließendem Slash. Page Objects entfernen führende Slashes vor `page.goto`, damit der Context Path bei der URL-Auflösung erhalten bleibt. Beispiel: `http://localhost:8080/meine-anwendung/login.xhtml`. Die Origin-Allowlist enthält weiterhin nur Origins ohne Context Path.
 
@@ -213,7 +213,7 @@ export default defineConfig({
 });
 ```
 
-Erst bei isolierten Testdaten parallelisieren. Chromium nutzt die von Playwright verwaltete Binary ohne channel oder executablePath. Chrome und Edge bleiben optional und werden nur über E2E_BROWSER aktiviert. Fehlende optionale Browser blockieren Chromium nicht. Video bleibt offline deaktiviert, da FFmpeg zusätzlich benötigt werden kann. Die Origin-Allowlist ist keine Netzwerksandbox; externe Weiterleitungen bleiben möglich.
+Erst bei isolierten Testdaten parallelisieren. Chromium ist der Standard über die npm-Skripte. Kein `executablePath` für Chromium: Playwright wählt seine verwaltete Binary. Chrome und Edge werden nur bei expliziter Projektauswahl gestartet; optionale Pfad-Overrides werden nicht beim Laden auf Existenz geprüft. Ein direkter Aufruf von `playwright test` ohne Projektauswahl führt alle Projekte aus. Offline bleibt Video deaktiviert, da es zusätzlich FFmpeg benötigen kann. Die Origin-Allowlist ist keine Netzwerksandbox und verhindert keine externen Weiterleitungen.
 
 ## 6. TypeScript
 
@@ -407,26 +407,31 @@ Bei fehlendem `E2E_LOGIN_PATH` die tatsächliche `.env.test` prüfen. Nach `load
 
 ## 12. Ausführung
 
-Quarkus im Root starten: `./mvnw quarkus:dev` (alternativ `mvn quarkus:dev`). In einem zweiten Terminal:
+Quarkus im Root starten: `./mvnw quarkus:dev`. In einem zweiten Terminal:
 
 ```bash
-npm --prefix frontend run test:e2e:setup
 npm --prefix frontend run test:e2e:typecheck
-npm --prefix frontend run test:e2e -- login.spec.ts
 npm --prefix frontend run test:e2e
-npm --prefix frontend run test:e2e:ui
+npm --prefix frontend run test:e2e -- login.spec.ts
 npm --prefix frontend run test:e2e -- --headed
 npm --prefix frontend run test:e2e -- --debug
 npm --prefix frontend run test:e2e -- --last-failed
 npm --prefix frontend run test:e2e -- --list
+npm --prefix frontend run test:e2e:ui
 npm --prefix frontend run test:e2e:report
-E2E_BROWSER=edge npm --prefix frontend run test:e2e
-E2E_BROWSER=chrome npm --prefix frontend run test:e2e
-E2E_BROWSER=all npm --prefix frontend run test:e2e
-npm --prefix frontend run test:e2e -- --grep 'Gültige Zugangsdaten'
 ```
 
-Codegen: `cd frontend && npx playwright codegen --browser chromium http://localhost:8080/meine-anwendung/login.xhtml` (bei leerem BASE_APP_PATH ohne `/meine-anwendung`). Generierten Code überarbeiten; keine aufgezeichneten Geheimnisse übernehmen.
+Optionale Cross-Browser-Tests und Codegen:
+
+```bash
+cd frontend
+npm run test:e2e:setup
+npx playwright test --project=chrome
+npx playwright test --project=edge
+npx playwright codegen --browser=chromium http://localhost:8080/meine-anwendung/login.xhtml
+```
+
+Chrome und Edge nur bewusst ausführen. Generierten Code überarbeiten und keine Geheimnisse übernehmen.
 
 ## 13. Playwright MCP
 
@@ -531,7 +536,7 @@ description: Implement, execute and analyze Playwright E2E tests for Quarkus JSF
 4. Planning: Define positive, negative, boundary, authorization and regression scenarios with expected outcomes.
 5. Implementation: Reuse page objects, use stable locators and web-first assertions; keep tests isolated.
 6. Type checking: npm --prefix frontend run test:e2e:typecheck
-7. Execution: npm --prefix frontend run test:e2e -- login.spec.ts or npm --prefix frontend run test:e2e
+7. Execution (Chromium only by default): npm --prefix frontend run test:e2e -- login.spec.ts or npm --prefix frontend run test:e2e
 8. Analysis: Inspect assertions, console, network, screenshots, traces, videos and available application logs. Classify test, application, environment, data and flaky failures.
 9. Verification: Fix test defects only; rerun up to three correction cycles. Do not weaken assertions or suppress failures.
 10. Reporting: List environment, browser, passed/failed/skipped/flaky tests, defects, changed files, artifacts and remaining blockers.
@@ -555,7 +560,7 @@ OpenCode im Root starten und den Subagenten ansprechen:
 
 ```text
 @e2e-tester
-Verwende den playwright-e2e Skill. Analysiere die Login-XHTML-Dateien, Backing Beans und Authentifizierungslogik. Untersuche die laufende Testanwendung über vorhandene Browser-MCP-Tools. Ermittle tatsächliche Locators, Meldungen und Weiterleitungsziele. Vervollständige die Playwright-Infrastruktur im bestehenden frontend-Verzeichnis. Implementiere Formularanzeige, gültige und ungültige Anmeldung, Pflichtfeldvalidierung, Zugriffsschutz und Logout, soweit fachlich unterstützt. Führe Typprüfung und Login-Tests aus. Analysiere Fehler und korrigiere ausschließlich Testimplementierungsfehler. Berichte tatsächliche Ergebnisse und Anwendungsdefekte. Keine Änderungen an fachlicher Anwendungslogik ohne Zustimmung.
+Verwende den playwright-e2e Skill. Analysiere die Login-XHTML-Dateien, Backing Beans und Authentifizierungslogik. Untersuche die laufende Testanwendung mit Chromium über Playwright MCP. Ermittle tatsächliche Locators, Meldungen und Weiterleitungsziele. Vervollständige die Playwright-Infrastruktur im bestehenden frontend-Verzeichnis. Implementiere Formularanzeige, gültige und ungültige Anmeldung, Pflichtfeldvalidierung, Zugriffsschutz und Logout, soweit fachlich unterstützt. Führe Typprüfung und Login-Tests aus. Analysiere Fehler und korrigiere ausschließlich Testimplementierungsfehler. Berichte tatsächliche Ergebnisse und Anwendungsdefekte. Keine Änderungen an fachlicher Anwendungslogik ohne Zustimmung.
 ```
 
 ## 18. Authentifizierung für weitere Tests
