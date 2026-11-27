@@ -80,21 +80,18 @@ mkdir -p frontend/tests/e2e/{pages,specs,fixtures,utils}
 mkdir -p .agents/skills/playwright-e2e .opencode/agents
 ```
 
-### Ubuntu ohne Internet: vorhandene Browser verwenden
+### Chromium als Standardbrowser (bereits installiert)
 
-Edge ist vorinstalliert, Chrome wird separat manuell installiert. Standardmäßig keine `playwright install`- oder `install --with-deps`-Befehle ausführen. Die optionalen Installationsskripte bleiben für Umgebungen mit freigegebenem Downloadzugriff erhalten. npm-Pakete müssen über die interne Registry oder einen vorbereiteten Cache verfügbar sein.
+Die von Playwright verwaltete Chromium-Version ist bereits installiert. Keine erneute Installation bei jedem Testlauf. Prüfen:
 
 ```bash
-which microsoft-edge || which microsoft-edge-stable
-which google-chrome || which google-chrome-stable
-# Pfade direkt für den aktuellen Shell-Prozess übernehmen:
-export EDGE_EXECUTABLE="$(which microsoft-edge || which microsoft-edge-stable)"
-export CHROME_EXECUTABLE="$(which google-chrome || which google-chrome-stable)"
-microsoft-edge --version
-google-chrome --version
+cd frontend
+npx playwright install --list
 ```
 
-Die tatsächlich ausgegebenen absoluten Pfade in `.env.test` eintragen (Beispiele unten). `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` kann zusätzlich vor npm-Installationen exportiert werden; es ersetzt nicht die Browser-Konfiguration und verhindert keinen ausdrücklich gestarteten Installationsbefehl. Systembibliotheken müssen bereits vorhanden sein.
+Nur falls eine zur lokalen Playwright-Version passende Browser-Version fehlt und Downloadzugriff freigegeben ist: `npx playwright install chromium`. Auf einem geeigneten Linux-CI-Runner bei Bedarf `npx playwright install --with-deps chromium`. Offline den passenden Browser-Cache und Systembibliotheken bereitstellen.
+
+Chrome und Edge bleiben optionale Systembrowser. Ihre Standardinstallationspfade werden über die Playwright-Channels aufgelöst; abweichende Pfade können in .env.test gesetzt werden. Sie sind für Chromium-Tests nicht erforderlich.
 
 ### Bedeutung der npm-Pakete
 
@@ -128,7 +125,9 @@ BASE_APP_PATH=/meine-anwendung
 E2E_ALLOWED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080
 E2E_USERNAME=
 E2E_PASSWORD=
-# Optional: tatsächliche which-Ausgabe eintragen; leer = automatische Suche
+# Optional: abweichende absolute Browserpfade; leer = Standardinstallation
+# Browserauswahl optional: chromium (Standard), chrome, edge, all
+# E2E_BROWSER=chromium
 EDGE_EXECUTABLE=
 CHROME_EXECUTABLE=
 E2E_LOGIN_PATH=/login.xhtml
@@ -155,7 +154,6 @@ Nur dedizierte Testkonten verwenden. URLs, Meldungen und Locators sind Beispiele
 import { defineConfig, devices } from '@playwright/test';
 import { loadEnvFile } from 'node:process';
 import { existsSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
 const envFile = path.resolve(__dirname, '.env.test');
@@ -173,15 +171,17 @@ if (!allowedOrigins.includes(baseURL.origin)) {
   throw new Error('E2E target is not an approved test origin');
 }
 
-// Explizite Umgebungsvariable hat Vorrang, sonst lokale Binary über which suchen.
-function browserPath(override: string | undefined, ...names: string[]): string {
-  if (override) return override;
-  for (const name of names) {
-    try {
-      return execFileSync('which', [name], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    } catch { /* nächsten Binary-Namen versuchen */ }
-  }
-  throw new Error(`Browser nicht gefunden: ${names.join(', ')}. Pfad setzen oder Browser nach Freigabe installieren.`);
+// Chromium ist Standard. Weitere Browser nur bei expliziter Auswahl aktivieren.
+const browser = process.env.E2E_BROWSER || 'chromium';
+const projects = [
+  { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+  { name: 'chrome', use: { ...devices['Desktop Chrome'], channel: 'chrome',
+    launchOptions: { executablePath: process.env.CHROME_EXECUTABLE || undefined } } },
+  { name: 'edge', use: { ...devices['Desktop Edge'], channel: 'msedge',
+    launchOptions: { executablePath: process.env.EDGE_EXECUTABLE || undefined } } }
+];
+if (browser !== 'all' && !projects.some(project => project.name === browser)) {
+  throw new Error('Invalid E2E_BROWSER: ' + browser);
 }
 
 export default defineConfig({
@@ -209,16 +209,11 @@ export default defineConfig({
     video: 'off',
     ignoreHTTPSErrors: false
   },
-  projects: [
-    { name: 'edge', use: { ...devices['Desktop Edge'], channel: 'msedge',
-      launchOptions: { executablePath: browserPath(process.env.EDGE_EXECUTABLE, 'microsoft-edge', 'microsoft-edge-stable') } } },
-    { name: 'chrome', use: { ...devices['Desktop Chrome'], channel: 'chrome',
-      launchOptions: { executablePath: browserPath(process.env.CHROME_EXECUTABLE, 'google-chrome', 'google-chrome-stable') } } }
-  ]
+  projects: browser === 'all' ? projects : projects.filter(project => project.name === browser)
 });
 ```
 
-Erst bei isolierten Testdaten parallelisieren. Edge ist der Standard über die npm-Skripte. Chrome ist zusätzlich verfügbar. Diese Beispielkonfiguration löst beide Browserpfade beim Laden auf und setzt daher beide installierten Browser voraus. `launchOptions.executablePath` verwendet exakt die angegebene lokale Binary; `channel` allein würde den üblichen Systeminstallationspfad verwenden. Fehlende oder inkompatible Browser führen zu einem Fehler, nicht zu einem automatischen Download. Für Videoaufzeichnungen kann Playwright zusätzlich sein eigenes FFmpeg benötigen; offline daher `video: 'off'` verwenden, sofern dieses nicht bereitgestellt wurde. Die Origin-Allowlist verhindert versehentliche Auswahl eines anderen Basisziels; sie ist keine Netzwerksandbox und verhindert keine externen Weiterleitungen. Nur ausdrücklich freigegebene Testumgebungen eintragen.
+Erst bei isolierten Testdaten parallelisieren. Chromium nutzt die von Playwright verwaltete Binary ohne channel oder executablePath. Chrome und Edge bleiben optional und werden nur über E2E_BROWSER aktiviert. Fehlende optionale Browser blockieren Chromium nicht. Video bleibt offline deaktiviert, da FFmpeg zusätzlich benötigt werden kann. Die Origin-Allowlist ist keine Netzwerksandbox; externe Weiterleitungen bleiben möglich.
 
 ## 6. TypeScript
 
@@ -259,33 +254,13 @@ Datei: `frontend/package.json`. Beispiel für das gesamte npm-Projekt. Bestehend
     "build:css": "sass --no-source-map scss:css",
     "build": "npm run build:css",
     "test:e2e:setup": "if [ ! -e .env.test ]; then cp .env.test.example .env.test; fi",
-    "test:e2e:browser:versions": "(google-chrome --version || google-chrome-stable --version) && (microsoft-edge --version || microsoft-edge-stable --version)",
-    "pretest:e2e": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
-    "test:e2e": "playwright test --project=edge",
-    "pretest:e2e:login": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
-    "test:e2e:login": "playwright test --project=edge login.spec.ts",
-    "pretest:e2e:ui": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
-    "test:e2e:ui": "playwright test --project=edge --ui",
-    "pretest:e2e:headed": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
-    "test:e2e:headed": "playwright test --project=edge --headed",
-    "pretest:e2e:debug": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
-    "test:e2e:debug": "playwright test --project=edge --debug",
+    "pretest:e2e": "npm run test:e2e:setup",
+    "test:e2e": "playwright test",
+    "pretest:e2e:ui": "npm run test:e2e:setup",
+    "test:e2e:ui": "playwright test --ui",
     "test:e2e:report": "playwright show-report",
-    "pretest:e2e:list": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
-    "test:e2e:list": "playwright test --project=edge --list",
-    "pretest:e2e:failed": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
-    "test:e2e:failed": "playwright test --project=edge --last-failed",
     "test:e2e:typecheck": "tsc -p tsconfig.e2e.json",
-    "test:e2e:codegen": "playwright codegen --channel=msedge",
-    "pretest:e2e:all-browsers": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
-    "test:e2e:all-browsers": "playwright test",
-    "test:e2e:install": "playwright install msedge chrome",
-    "test:e2e:install:ci": "playwright install --with-deps msedge chrome",
-    "mcp:playwright": "playwright-mcp",
-    "pretest:e2e:chrome": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
-    "test:e2e:chrome": "playwright test --project=chrome",
-    "pretest:e2e:edge": "npm run test:e2e:setup && npm run test:e2e:browser:versions",
-    "test:e2e:edge": "playwright test --project=edge"
+    "mcp:playwright": "playwright-mcp --browser chromium"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.0",
@@ -298,16 +273,7 @@ Datei: `frontend/package.json`. Beispiel für das gesamte npm-Projekt. Bestehend
 }
 ```
 
-**Browser-Versionsprüfung:** `npm --prefix frontend run test:e2e:browser:versions` gibt die Versionen der lokal installierten Chrome- und Edge-Binaries aus (jeweils mit alternativem `-stable`-Namen). Alle pretest-Skripte für Playwright-Testläufe führen zuerst das Setup und anschließend diese Prüfung aus. Schlägt eine der beiden Prüfungen fehl, startet der Test nicht. Es werden keine Browser heruntergeladen. Die Versionsprüfung verwendet die Binaries aus `PATH`; bei expliziten `EDGE_EXECUTABLE`-/`CHROME_EXECUTABLE`-Overrides kann die tatsächlich verwendete Binary davon abweichen. Die Versionsausgabe allein bestätigt keine Playwright-Kompatibilität.
-
-**Hinweis zu den optionalen Installationsskripten:** JSON unterstützt keine Kommentare. `test:e2e:install` und `test:e2e:install:ci` nur nach Prüfung und Freigabe des Zugriffs auf die benötigten Browser-Downloadserver bzw. Paketquellen ausführen. Die Installation kann vorhandene systemweite Chrome-/Edge-Installationen verändern und benötigt gegebenenfalls Administratorrechte. In der abgeschotteten Ubuntu-Umgebung überspringen. Standardmäßig werden vorhandene Binaries über `which` bzw. explizite Umgebungsvariablen verwendet.
-
-```bash
-# Nur bei bestätigtem Downloadzugriff und Freigabe:
-npm --prefix frontend run test:e2e:install
-# Optional auf einem dafür vorgesehenen CI-Runner:
-npm --prefix frontend run test:e2e:install:ci
-```
+Die fünf zentralen Skripte werden durch das automatische Setup ergänzt. CLI-Argumente werden dynamisch über `--` weitergegeben. Keine Browserinstallation oder Prüfung von Chrome/Edge bei jedem Testlauf.
 
 Reproduzierbare Installation aus dem Root:
 
@@ -437,7 +403,7 @@ Für falsche Passwörter ein dediziertes Testkonto ohne unbeabsichtigte Sperrfol
 
 ### Fehlersuche: Umgebungsvariablen
 
-Bei fehlendem `E2E_LOGIN_PATH` die tatsächliche `.env.test` prüfen. Nach `loadEnvFile(envFile)` temporär `console.log(envFile, existsSync(envFile));` und `console.log(process.env.E2E_LOGIN_PATH);` ergänzen. Keine Zugangsdaten protokollieren. Bereits gesetzte Prozessvariablen haben Vorrang. Nach Änderungen den UI-Modus vollständig neu starten. Page Objects greifen direkt auf `process.env` zu; dotenv ist nicht erforderlich. Der Login-Pfad hat bewusst keinen stillen Fallback.
+Bei fehlendem `E2E_LOGIN_PATH` die tatsächliche `.env.test` prüfen. Nach `loadEnvFile(envFile)` temporär `console.log(envFile, existsSync(envFile));` und `console.log(process.env.E2E_LOGIN_PATH);` ergänzen. Keine Zugangsdaten protokollieren. Für die Browserauswahl E2E_BROWSER im Shell-Prozess setzen und keinen widersprechenden Wert in .env.test hinterlegen. Nach Änderungen den UI-Modus vollständig neu starten. Page Objects greifen direkt auf `process.env` zu; dotenv ist nicht erforderlich. Der Login-Pfad hat bewusst keinen stillen Fallback.
 
 ## 12. Ausführung
 
@@ -446,19 +412,21 @@ Quarkus im Root starten: `./mvnw quarkus:dev` (alternativ `mvn quarkus:dev`). In
 ```bash
 npm --prefix frontend run test:e2e:setup
 npm --prefix frontend run test:e2e:typecheck
-npm --prefix frontend run test:e2e:login
+npm --prefix frontend run test:e2e -- login.spec.ts
 npm --prefix frontend run test:e2e
 npm --prefix frontend run test:e2e:ui
-npm --prefix frontend run test:e2e:headed
-npm --prefix frontend run test:e2e:debug
-npm --prefix frontend run test:e2e:failed
-npm --prefix frontend run test:e2e:list
+npm --prefix frontend run test:e2e -- --headed
+npm --prefix frontend run test:e2e -- --debug
+npm --prefix frontend run test:e2e -- --last-failed
+npm --prefix frontend run test:e2e -- --list
 npm --prefix frontend run test:e2e:report
-npm --prefix frontend run test:e2e -- --project=edge
+E2E_BROWSER=edge npm --prefix frontend run test:e2e
+E2E_BROWSER=chrome npm --prefix frontend run test:e2e
+E2E_BROWSER=all npm --prefix frontend run test:e2e
 npm --prefix frontend run test:e2e -- --grep 'Gültige Zugangsdaten'
 ```
 
-Codegen: `npm --prefix frontend run test:e2e:codegen -- http://localhost:8080/meine-anwendung/login.xhtml` (bei leerem BASE_APP_PATH ohne `/meine-anwendung`). Generierten Code überarbeiten; keine aufgezeichneten Geheimnisse übernehmen.
+Codegen: `cd frontend && npx playwright codegen --browser chromium http://localhost:8080/meine-anwendung/login.xhtml` (bei leerem BASE_APP_PATH ohne `/meine-anwendung`). Generierten Code überarbeiten; keine aufgezeichneten Geheimnisse übernehmen.
 
 ## 13. Playwright MCP
 
@@ -478,14 +446,14 @@ Die Beispielversion `*` in der package.json ist durch die von npm gespeicherte k
   "mcp": {
     "playwright": {
       "type": "local",
-      "command": ["npm", "--prefix", "frontend", "--silent", "run", "mcp:playwright", "--", "--browser", "msedge", "--executable-path", "/usr/bin/microsoft-edge"],
+      "command": ["npm", "--prefix", "frontend", "--silent", "run", "mcp:playwright"],
       "enabled": true
     }
   }
 }
 ```
 
-Mit `opencode mcp list` prüfen und OpenCode neu starten. OpenCode aus dem Projekt-Root starten. Der lokale npm-Skriptaufruf nutzt den Paket-Binäreintrag statt eines fest codierten internen Dateipfads. Die Installation erfolgt im Frontend mit dessen .npmrc. MCP-Browser und Test-Runner-Kontexte sind getrennt. Den MCP-Pfad durch die Ausgabe von `which microsoft-edge` ersetzen; alternativ kann ein Shell-Aufruf mit `--executable-path "$(which microsoft-edge || which microsoft-edge-stable)"` den Pfad dynamisch auflösen; für Chrome `--browser chrome --executable-path /usr/bin/google-chrome` verwenden. Die verfügbaren Optionen mit dem lokal installierten MCP-Paket über `npm run mcp:playwright -- --help` prüfen. Keine Browserinstallation durch den Agenten auslösen.
+Mit `opencode mcp list` prüfen und OpenCode neu starten. OpenCode aus dem Projekt-Root starten. Der lokale npm-Skriptaufruf nutzt den Paket-Binäreintrag statt eines fest codierten internen Dateipfads. Die Installation erfolgt im Frontend mit dessen .npmrc. MCP-Browser und Test-Runner-Kontexte sind getrennt. Der MCP verwendet standardmäßig Chromium. Für optionale Chrome-/Edge-MCP-Server separate Konfigurationen mit passendem Browser und gegebenenfalls executable-path verwenden. Die verfügbaren Optionen mit dem lokal installierten MCP-Paket über `npm run mcp:playwright -- --help` prüfen. Keine Browserinstallation durch den Agenten auslösen.
 
 ## 14. AGENTS.md ergänzen
 
@@ -495,7 +463,7 @@ Mit `opencode mcp list` prüfen und OpenCode neu starten. OpenCode aus dem Proje
 - npm project: frontend/
 - Tests: frontend/tests/e2e/
 - Use the playwright-e2e skill.
-- Prefer preinstalled Edge/Chrome; resolve binaries with which or explicit environment variables. Never run optional browser installation scripts without confirmed download access and explicit approval.
+- Use installed Playwright-managed Chromium by default for tests and MCP. Chrome and Edge are optional and require explicit selection via E2E_BROWSER. Never install browsers without confirmed download access and explicit approval.
 - Analyze XHTML, backing beans and expected behavior first.
 - Inspect the actual rendered DOM via browser MCP.
 - Prefer accessible, stable locators; account for JSF naming containers and AJAX.
@@ -535,7 +503,7 @@ permission:
   bash:
     "*": ask
     "npm --prefix frontend run test:e2e": allow
-    "npm --prefix frontend run test:e2e:login": allow
+    "npm --prefix frontend run test:e2e -- login.spec.ts": allow
     "npm --prefix frontend run test:e2e:typecheck": allow
 ---
 
@@ -558,12 +526,12 @@ description: Implement, execute and analyze Playwright E2E tests for Quarkus JSF
 ---
 # Workflow
 1. Discovery: Read AGENTS.md, existing tests, XHTML, backing beans and authentication logic.
-2. Environment: Verify test URL, application readiness and test data without exposing credentials.
+2. Environment: Verify test URL, application readiness, installed Chromium and test data without exposing credentials. Use Chromium unless explicitly requested otherwise.
 3. Browser inspection: Inspect accessibility tree, DOM, client IDs, validation and AJAX behavior. Never invent locators.
 4. Planning: Define positive, negative, boundary, authorization and regression scenarios with expected outcomes.
 5. Implementation: Reuse page objects, use stable locators and web-first assertions; keep tests isolated.
 6. Type checking: npm --prefix frontend run test:e2e:typecheck
-7. Execution: npm --prefix frontend run test:e2e:login or npm --prefix frontend run test:e2e
+7. Execution: npm --prefix frontend run test:e2e -- login.spec.ts or npm --prefix frontend run test:e2e
 8. Analysis: Inspect assertions, console, network, screenshots, traces, videos and available application logs. Classify test, application, environment, data and flaky failures.
 9. Verification: Fix test defects only; rerun up to three correction cycles. Do not weaken assertions or suppress failures.
 10. Reporting: List environment, browser, passed/failed/skipped/flaky tests, defects, changed files, artifacts and remaining blockers.
@@ -647,7 +615,7 @@ e2e:
       junit: frontend/test-results/junit.xml
 ```
 
-Voraussetzung: Linux-Runner mit Node.js 24 und vorinstalliertem Edge und vorhandenen Browser-Systemabhängigkeiten sowie eine bereits gestartete, erreichbare Testanwendung mit Testdatenbank. BASE_URL, BASE_APP_PATH, E2E_ALLOWED_ORIGINS und Zugangsdaten über geschützte CI-Variablen setzen. Artefaktzugriff einschränken.
+Voraussetzung: Linux-Runner mit Node.js 24 und passendem Playwright-Chromium im Browser-Cache und vorhandenen Browser-Systemabhängigkeiten sowie eine bereits gestartete, erreichbare Testanwendung mit Testdatenbank. BASE_URL, BASE_APP_PATH, E2E_ALLOWED_ORIGINS und Zugangsdaten über geschützte CI-Variablen setzen. Artefaktzugriff einschränken.
 
 ### Weitere Testarten
 
@@ -658,7 +626,7 @@ Voraussetzung: Linux-Runner mit Node.js 24 und vorinstalliertem Edge und vorhand
 
 ## 21. Checkliste
 
-- [ ] Playwright-Pakete installieren und vorhandene Browserpfade prüfen
+- [ ] Playwright-Pakete und vorhandenen Chromium-Cache prüfen
 - [ ] Projektstruktur, Umgebungsvariablen und Gitignore anlegen
 - [ ] Playwright- und TypeScript-Konfiguration erstellen
 - [ ] npm-Skripte ergänzen
